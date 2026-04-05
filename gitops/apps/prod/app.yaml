@@ -1,0 +1,27 @@
+# ArgoCD Application — Prod Environment
+# Sync policy is manual for prod — requires ArgoCD UI approval.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kumarrajapuvvalla-bit/k8s-gitops-platform
+    targetRevision: HEAD
+    path: helm-charts/app-chart
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # No automated sync for prod — manual approval required in ArgoCD UI

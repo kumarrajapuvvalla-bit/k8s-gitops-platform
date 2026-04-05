@@ -1,0 +1,6 @@
+# tfsec configuration
+# Controls severity thresholds and per-check overrides
+
+minimum_severity: HIGH
+exclude:
+  - aws-eks-no-public-cluster-access  # Overridden per environment; prod has public endpoint disabled

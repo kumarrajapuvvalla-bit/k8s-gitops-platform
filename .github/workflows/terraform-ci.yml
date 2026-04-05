@@ -1,0 +1,103 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'infrastructure/**'
+
+jobs:
+  security-scan:
+    name: Security Scan (tfsec + Checkov)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infrastructure
+          soft_fail: false
+          format: sarif
+          out_file: tfsec.sarif
+
+      - name: Upload tfsec SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: tfsec.sarif
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infrastructure
+          framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail: false
+          skip_check: CKV_AWS_79  # IMDSv2 — acceptable in EKS managed nodes
+
+      - name: Upload Checkov SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov.sarif
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: security-scan
+    strategy:
+      matrix:
+        environment: [dev, prod]
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', upper(matrix.environment))] }}
+          aws-region: eu-west-2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '~1.5'
+
+      - name: Terraform Init
+        working-directory: infrastructure/environments/${{ matrix.environment }}
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: infrastructure/environments/${{ matrix.environment }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: infrastructure/environments/${{ matrix.environment }}
+        run: terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infrastructure/environments/${{ matrix.environment }}/plan.txt', 'utf8');
+            const truncated = plan.length > 65000 ? plan.substring(0, 65000) + '\n...[truncated]' : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan — \`${{ matrix.environment }}\`\n\`\`\`hcl\n${truncated}\n\`\`\``
+            });

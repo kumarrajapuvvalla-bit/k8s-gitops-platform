@@ -1,0 +1,14 @@
+# Checkov configuration
+# Defines global skip list and framework settings
+
+compact: true
+quiet: false
+framework:
+  - terraform
+  - kubernetes
+  - helm
+skip-check:
+  - CKV_AWS_79    # IMDSv2 — handled at EKS managed node level
+  - CKV_AWS_144   # S3 cross-region replication — not required for tfstate
+  - CKV_K8S_43    # Image digest pinning — managed via ECR immutable tags
+output: cli

@@ -1,0 +1,63 @@
+name: Helm Lint
+
+on:
+  pull_request:
+    paths:
+      - 'helm-charts/**'
+      - 'gitops/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'helm-charts/**'
+      - 'gitops/**'
+
+jobs:
+  helm-lint:
+    name: Helm Lint & Template Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'
+
+      - name: Helm Lint (default values)
+        run: helm lint helm-charts/app-chart/
+
+      - name: Helm Lint (dev values)
+        run: helm lint helm-charts/app-chart/ -f helm-charts/app-chart/values-dev.yaml
+
+      - name: Helm Lint (prod values)
+        run: helm lint helm-charts/app-chart/ -f helm-charts/app-chart/values-prod.yaml
+
+      - name: Helm Template (dev)
+        run: |
+          helm template app-dev helm-charts/app-chart/ \
+            -f helm-charts/app-chart/values-dev.yaml \
+            --namespace app-dev > /tmp/rendered-dev.yaml
+          echo "Dev template rendered successfully"
+
+      - name: Helm Template (prod)
+        run: |
+          helm template app-prod helm-charts/app-chart/ \
+            -f helm-charts/app-chart/values-prod.yaml \
+            --namespace app-prod > /tmp/rendered-prod.yaml
+          echo "Prod template rendered successfully"
+
+      - name: Checkov — Scan Rendered Helm Manifests
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          file: /tmp/rendered-prod.yaml
+          framework: kubernetes
+          output_format: cli
+          soft_fail: true
+          compact: true
+
+      - name: Validate ArgoCD Manifests (YAML lint)
+        run: |
+          pip install yamllint
+          yamllint gitops/ -d '{extends: relaxed, rules: {line-length: {max: 200}}}'
