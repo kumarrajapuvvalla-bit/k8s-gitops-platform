@@ -1,0 +1,4 @@
+# Dependencies for DevOps automation scripts
+boto3==1.34.131
+botocore==1.34.131
+kubernetes==30.1.0

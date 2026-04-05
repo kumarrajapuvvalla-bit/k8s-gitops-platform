@@ -1,0 +1,62 @@
+name: Python Tests
+
+on:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'scripts/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'
+      - 'scripts/**'
+
+jobs:
+  test:
+    name: pytest + lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install app dependencies
+        run: pip install -r app/requirements.txt
+
+      - name: Run pytest
+        run: |
+          cd app
+          pytest tests/ -v --tb=short --color=yes
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check app/ scripts/ --select E,F,W --ignore E501
+
+      - name: Type check with mypy
+        run: |
+          pip install mypy
+          mypy app/main.py --ignore-missing-imports
+
+  security:
+    name: Bandit Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Bandit
+        uses: PyCQA/bandit-action@v1
+        with:
+          targets: app/ scripts/
+          level: medium
+          confidence: medium
