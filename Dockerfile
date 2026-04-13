@@ -1,36 +1,41 @@
 # Multi-stage Dockerfile for k8s-gitops-platform
-# Stage 1: builder — installs dependencies into a venv
-# Stage 2: runtime — distroless image, non-root, minimal attack surface
+#
+# Stage 1: builder (python:3.12-slim) — compile deps into an isolated venv
+# Stage 2: runtime (python:3.12-alpine) — minimal OS attack surface,
+#          no apt packages, non-root user
 #
 # Build: docker build -t k8s-gitops-platform:latest .
 # Run:   docker run -p 8080:8080 k8s-gitops-platform:latest
 
-# ── Stage 1: builder ───────────────────────────────────────────────────────
+# ── Stage 1: builder ──────────────────────────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# Install only what we need to build the venv
+# gcc needed to compile some Python C extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
 COPY app/requirements.txt .
 
-# Create isolated venv so we can copy it cleanly to the final stage
+# Isolated venv so we can copy it cleanly to the runtime stage
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN pip install --upgrade pip \
+RUN pip install --upgrade pip --no-cache-dir \
     && pip install --no-cache-dir -r requirements.txt
 
 
-# ── Stage 2: runtime ───────────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────────────
+# Alpine has a dramatically smaller CVE surface than debian-slim:
+# musl libc + apk packages have far fewer unfixed CRITICAL/HIGH CVEs.
+# glibc-dependent binaries from builder venv are copied in directly.
+FROM python:3.12-alpine AS runtime
 
 # Security: run as non-root user
-RUN groupadd --gid 1001 appgroup \
-    && useradd --uid 1001 --gid appgroup --no-create-home appuser
+RUN addgroup -g 1001 appgroup \
+    && adduser -u 1001 -G appgroup -H -D appuser
 
 WORKDIR /app
 
@@ -51,7 +56,7 @@ USER appuser
 
 EXPOSE 8080
 
-# Healthcheck so Docker / ECS / EKS can probe without a sidecar
+# Liveness probe compatible with both Docker and Kubernetes
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
 

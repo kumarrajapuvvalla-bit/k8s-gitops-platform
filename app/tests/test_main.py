@@ -1,98 +1,122 @@
-"""Unit tests for the k8s-gitops-platform FastAPI service.
+"""test_main.py — pytest test suite for k8s-gitops-platform FastAPI app.
 
-Runs with: pytest app/tests/ -v
-All tests use the ASGI test client — no real server needed.
+Covers all public endpoints: /, /health, /ready, /metrics
+and validates response shapes, status codes, and key fields.
 """
 
-import pytest
 from fastapi.testclient import TestClient
-
-# Add the app directory to sys.path so the import resolves cleanly
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from main import app  # noqa: E402
+from main import app, APP_VERSION, ENVIRONMENT
 
 client = TestClient(app)
 
 
-# ── Health endpoint ────────────────────────────────────────────────────────
-
-class TestHealth:
-    def test_returns_200(self):
-        response = client.get("/health")
-        assert response.status_code == 200
-
-    def test_response_has_status_healthy(self):
-        response = client.get("/health")
-        assert response.json()["status"] == "healthy"
-
-    def test_response_has_version(self):
-        response = client.get("/health")
-        assert "version" in response.json()
-
-    def test_response_has_timestamp(self):
-        response = client.get("/health")
-        assert "timestamp" in response.json()
-
-    def test_response_has_environment(self):
-        response = client.get("/health")
-        assert "environment" in response.json()
-
-
-# ── Readiness endpoint ─────────────────────────────────────────────────────
-
-class TestReadiness:
-    def test_returns_200(self):
-        response = client.get("/ready")
-        assert response.status_code == 200
-
-    def test_response_has_status_ready(self):
-        response = client.get("/ready")
-        assert response.json()["status"] == "ready"
-
-    def test_response_has_uptime(self):
-        response = client.get("/ready")
-        assert "uptime_seconds" in response.json()
-        assert isinstance(response.json()["uptime_seconds"], float)
-
-
-# ── Metrics endpoint ───────────────────────────────────────────────────────
-
-class TestMetrics:
-    def test_returns_200(self):
-        response = client.get("/metrics")
-        assert response.status_code == 200
-
-    def test_content_type_is_prometheus(self):
-        response = client.get("/metrics")
-        assert "text/plain" in response.headers["content-type"]
-
-    def test_contains_uptime_metric(self):
-        response = client.get("/metrics")
-        assert "app_uptime_seconds" in response.text
-
-    def test_prometheus_format_has_help_line(self):
-        response = client.get("/metrics")
-        assert "# HELP" in response.text
-
-    def test_prometheus_format_has_type_line(self):
-        response = client.get("/metrics")
-        assert "# TYPE" in response.text
-
-
-# ── Root endpoint ──────────────────────────────────────────────────────────
+# ── Root ───────────────────────────────────────────────────────────────────────
 
 class TestRoot:
-    def test_returns_200(self):
-        response = client.get("/")
-        assert response.status_code == 200
+    def test_root_status(self):
+        r = client.get("/")
+        assert r.status_code == 200
 
-    def test_contains_service_name(self):
-        response = client.get("/")
-        assert response.json()["service"] == "k8s-gitops-platform"
+    def test_root_has_service_key(self):
+        body = client.get("/").json()
+        assert body["service"] == "k8s-gitops-platform"
 
-    def test_contains_docs_link(self):
-        response = client.get("/")
-        assert response.json()["docs"] == "/docs"
+    def test_root_has_version(self):
+        body = client.get("/").json()
+        assert body["version"] == APP_VERSION
+
+    def test_root_has_docs_link(self):
+        body = client.get("/").json()
+        assert body["docs"] == "/docs"
+
+    def test_root_has_environment(self):
+        body = client.get("/").json()
+        assert body["environment"] == ENVIRONMENT
+
+
+# ── Health ───────────────────────────────────────────────────────────────────
+
+class TestHealth:
+    def test_health_status_200(self):
+        r = client.get("/health")
+        assert r.status_code == 200
+
+    def test_health_body_status_healthy(self):
+        body = client.get("/health").json()
+        assert body["status"] == "healthy"
+
+    def test_health_has_version(self):
+        body = client.get("/health").json()
+        assert body["version"] == APP_VERSION
+
+    def test_health_has_environment(self):
+        body = client.get("/health").json()
+        assert body["environment"] == ENVIRONMENT
+
+    def test_health_has_timestamp(self):
+        body = client.get("/health").json()
+        assert "timestamp" in body
+        # Should be ISO-8601 with timezone
+        assert "T" in body["timestamp"]
+
+
+# ── Readiness ─────────────────────────────────────────────────────────────────
+
+class TestReadiness:
+    def test_ready_status_200(self):
+        r = client.get("/ready")
+        assert r.status_code == 200
+
+    def test_ready_body_status_ready(self):
+        body = client.get("/ready").json()
+        assert body["status"] == "ready"
+
+    def test_ready_has_uptime(self):
+        body = client.get("/ready").json()
+        assert "uptime_seconds" in body
+        assert isinstance(body["uptime_seconds"], (int, float))
+        assert body["uptime_seconds"] >= 0
+
+
+# ── Metrics ───────────────────────────────────────────────────────────────────
+
+class TestMetrics:
+    def test_metrics_status_200(self):
+        r = client.get("/metrics")
+        assert r.status_code == 200
+
+    def test_metrics_content_type_prometheus(self):
+        r = client.get("/metrics")
+        assert "text/plain" in r.headers["content-type"]
+
+    def test_metrics_contains_uptime_gauge(self):
+        r = client.get("/metrics")
+        assert "app_uptime_seconds" in r.text
+
+    def test_metrics_contains_help_line(self):
+        r = client.get("/metrics")
+        assert "# HELP" in r.text
+
+    def test_metrics_contains_type_line(self):
+        r = client.get("/metrics")
+        assert "# TYPE" in r.text
+
+    def test_metrics_contains_environment_label(self):
+        r = client.get("/metrics")
+        assert f'environment="{ENVIRONMENT}"' in r.text
+
+
+# ── OpenAPI / docs ─────────────────────────────────────────────────────────────
+
+class TestOpenAPI:
+    def test_openapi_json_accessible(self):
+        r = client.get("/openapi.json")
+        assert r.status_code == 200
+
+    def test_openapi_has_correct_title(self):
+        body = client.get("/openapi.json").json()
+        assert body["info"]["title"] == "k8s-gitops-platform"
+
+    def test_openapi_has_version(self):
+        body = client.get("/openapi.json").json()
+        assert body["info"]["version"] == APP_VERSION

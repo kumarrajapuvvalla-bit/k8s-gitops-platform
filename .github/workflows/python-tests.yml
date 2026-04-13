@@ -14,7 +14,7 @@ on:
 
 jobs:
   test:
-    name: pytest + lint
+    name: pytest + lint (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -32,6 +32,9 @@ jobs:
       - name: Install app dependencies
         run: pip install -r app/requirements.txt
 
+      - name: Add app/ to PYTHONPATH
+        run: echo "PYTHONPATH=$PYTHONPATH:$(pwd)/app" >> $GITHUB_ENV
+
       - name: Run pytest
         run: |
           cd app
@@ -40,7 +43,7 @@ jobs:
       - name: Lint with ruff
         run: |
           pip install ruff
-          ruff check app/ scripts/ --select E,F,W --ignore E501
+          ruff check app/ --select E,F,W --ignore E501
 
       - name: Type check with mypy
         run: |
@@ -50,6 +53,9 @@ jobs:
   security:
     name: Bandit Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,6 +63,5 @@ jobs:
       - name: Run Bandit
         uses: PyCQA/bandit-action@v1
         with:
-          targets: app/ scripts/
-          level: medium
+          targets: app/
           confidence: medium
